@@ -35,7 +35,6 @@ import org.oneedtech.inspect.schema.SchemaKey;
 import org.oneedtech.inspect.util.json.ObjectMapperCache;
 import org.oneedtech.inspect.util.resource.Resource;
 import org.oneedtech.inspect.util.resource.ResourceType;
-import org.oneedtech.inspect.util.resource.UriResource;
 import org.oneedtech.inspect.util.resource.context.ResourceContext;
 import org.oneedtech.inspect.util.spec.Specification;
 import org.oneedtech.inspect.vc.VerifiableCredential.Type;
@@ -59,6 +58,7 @@ import org.oneedtech.inspect.vc.probe.RunContextKey;
 import org.oneedtech.inspect.vc.probe.TypePropertyProbe;
 import org.oneedtech.inspect.vc.probe.did.DidResolver;
 import org.oneedtech.inspect.vc.probe.did.SimpleDidResolver;
+import org.oneedtech.inspect.vc.status.bitstring.DownloadedResource;
 import org.oneedtech.inspect.vc.util.CachingDocumentLoader;
 import org.velocitynetwork.contracts.VelocityNetworkDidResolver;
 import org.velocitynetwork.contracts.VelocityNetworkMetadataRegistryFacade;
@@ -269,11 +269,13 @@ public class OB30Inspector extends VCInspector implements SubInspector {
         Optional<String> newID = checkRefreshService(ob, ctx);
         if (newID.isPresent()) {
           // If the refresh is not successful, continue the verification process using the original
-          // OpenBadgeCredential.
-          UriResource uriResource =
-              new UriResource(new URI(newID.get()), null, REFRESH_SERVICE_RESOURCE_TYPES);
-          if (uriResource.exists()) {
-            accumulator.add(this.run(uriResource.setContext(new ResourceContext(REFRESHED, TRUE))));
+          // OpenBadgeCredential. The refreshed credential is downloaded only from public addresses:
+          // the validator runs next to internal services that must not be reachable from a URL a
+          // credential declares.
+          Optional<DownloadedResource> refreshed = downloadRefreshedCredential(newID.get());
+          if (refreshed.isPresent()) {
+            accumulator.add(
+                this.run(refreshed.get().setContext(new ResourceContext(REFRESHED, TRUE))));
           }
         }
       }
@@ -335,6 +337,26 @@ public class OB30Inspector extends VCInspector implements SubInspector {
       set(Specification.OB_30);
       set(ResourceType.OPENBADGE);
       return new OB30Inspector(this);
+    }
+  }
+
+  /** Upper bound for a refreshed credential downloaded from a {@code refreshService}. */
+  private static final int MAX_REFRESHED_CREDENTIAL_BYTES = 2 * 1024 * 1024;
+
+  /**
+   * Downloads the credential a {@code refreshService} points to, from public addresses only.
+   *
+   * @param id the {@code refreshService.id}
+   * @return the downloaded credential, or empty if it is not an http(s) URL, resolves to an
+   *     internal address, or cannot be downloaded
+   */
+  private static Optional<DownloadedResource> downloadRefreshedCredential(String id) {
+    try {
+      return Optional.of(
+          DownloadedResource.download(
+              new URI(id), false, REFRESH_SERVICE_RESOURCE_TYPES, MAX_REFRESHED_CREDENTIAL_BYTES));
+    } catch (Exception e) {
+      return Optional.empty();
     }
   }
 }

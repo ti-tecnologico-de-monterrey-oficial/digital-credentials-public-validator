@@ -1,0 +1,67 @@
+name: 1EdTech Validator Validation
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - release
+      - main
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Validate:
+    name: Pruebas, imagen y vulnerabilidades
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Preparar Java
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Compilar y ejecutar las pruebas
+        run: mvn -B -ntp verify
+
+      - name: Construir la imagen
+        run: docker build --tag dcc-1edtech:ci .
+
+      - name: Probar la imagen
+        run: |
+          docker run --detach --name dcc-1edtech --publish 8080:8080 dcc-1edtech:ci
+          for _ in $(seq 1 60); do
+            curl --fail --silent localhost:8080/actuator/health | grep --quiet '"UP"' && break
+            sleep 2
+          done
+          curl --fail --silent localhost:8080/actuator/health | grep --quiet '"UP"'
+          curl --fail --silent \
+            --form "file=@inspector-vc/src/test/resources/ob30/simple.json;type=application/json" \
+            "http://localhost:8080/api/validate?validatorId=OB30Inspector" \
+            | jq --exit-status '.summary.outcome == "VALID"'
+
+      - name: Mostrar los logs del contenedor
+        if: failure()
+        run: docker logs dcc-1edtech || true
+
+      # .trivyignore documenta las excepciones aceptadas.
+      - name: Buscar vulnerabilidades HIGH y CRITICAL
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/.trivyignore:/.trivyignore:ro" \
+            aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image \
+            --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --ignorefile /.trivyignore --exit-code 1 dcc-1edtech:ci

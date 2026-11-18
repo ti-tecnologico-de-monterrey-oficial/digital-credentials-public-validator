@@ -189,8 +189,7 @@ de Velocity y los demás métodos van al resolvedor universal `dev.uniresolver.i
 
 ## Despliegue
 
-Está pensado para correr como sidecar de `dcc-services`, igual que VerifierPlus. Hoy no está
-desplegado en ningún ambiente; esta es la configuración con la que se probó:
+Corre como sidecar de `dcc-services`, igual que VerifierPlus, en devl y pprd:
 
 | Ambiente | Container App | Contenedor | Puerto |
 |---|---|---|---|
@@ -199,8 +198,9 @@ desplegado en ningún ambiente; esta es la configuración con la que se probó:
 
 Cada sidecar tiene 0.5 vCPU y 1 GiB, sondas HTTP a `/actuator/health` y
 `STATUS_LIST_URL_REWRITES=https://<fqdn de dcc-services>/status-credential/|http://127.0.0.1:3000/status-credential/`.
-`dcc-services` lo usa con `ONEEDTECH_URL=http://127.0.0.1:3002`. La imagen es
-`azrdevlcredentials.azurecr.io/dcc-1edtech:<versión>` y sirve para ambos ambientes.
+`dcc-services` lo usa con `ONEEDTECH_URL=http://127.0.0.1:3002`: es el proveedor `1edtech`, que se
+elige por petición (`verifier=1edtech`) o con `DEFAULT_VERIFIER`. La imagen es
+`azrdevlcredentials.azurecr.io/dcc-1edtech:<sha del commit>` y sirve para ambos ambientes.
 
 Workflows:
 
@@ -210,14 +210,16 @@ Workflows:
   en ACR, comprueba que el contenedor `dcc-1edtech-devl` ya existe, actualiza solo ese contenedor
   y espera a que la revisión quede sana; al llegar a `release`, lo mismo con `dcc-1edtech-pprd`.
   Un cambio que solo toca archivos `*.md` no despliega. Producción todavía no tiene el sidecar.
-  - Las ramas `develop` y `release` hay que crearlas en este repositorio (hoy solo existe `main`).
+  - Los cambios entran por pull request a `develop`; después se pasan de `develop` a `release` y
+    de `release` a `main`.
   - El lanzamiento a mano (`workflow_dispatch`) solo aparece cuando el workflow ya está en `main`,
     la rama por omisión.
   - El sidecar se crea una sola vez a mano, con la configuración de la tabla de arriba: si no
     existe, el workflow falla en lugar de crearlo sin variables ni sondas.
 
 El despliegue necesita en cada environment de GitHub (`Dev`, `Pprd`) las mismas variables que
-tec-credentials: `vars.AZURE_CONTAINER_REGISTRY`, `vars.RESOURCE_GROUP` y
-`secrets.AZURE_CREDENTIALS`. Como `dcc-services` se despliega desde tec-credentials, sus
+tec-credentials: `vars.AZURE_CONTAINER_REGISTRY` (`azrdevlcredentials`), `vars.RESOURCE_GROUP`
+(`RG_Servicios_TecCredentials_Devl`, también para pprd) y `secrets.AZURE_CREDENTIALS`. Crear los
+environments requiere ser administrador del repositorio. Como `dcc-services` se despliega desde tec-credentials, sus
 workflows no comparten grupo de concurrencia con este: si los dos actualizan la misma Container
 App al mismo tiempo, uno puede fallar y hay que relanzarlo.

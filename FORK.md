@@ -15,8 +15,9 @@ del Tec y se abre un pull request; esta descripción dice en qué versión se ba
 El validador descarga la lista de estado (`credentialStatus.statusListCredential`) de cada
 credencial. Las del Tec viven en `dcc-services`, dentro del ambiente interno de Container Apps, y
 https://vc.1ed.tech no las alcanza: la corrida termina en excepción y `dcc-services` no puede dar
-por comprobada la firma ni la expiración. Alojado dentro del mismo ambiente las lee como el
-sidecar de VerifierPlus, y las credenciales no salen de Azure.
+por comprobada la firma ni la expiración. Alojado como sidecar de `dcc-services` las lee desde
+dentro del ambiente, y las credenciales no salen de Azure. Es el único verificador de
+`dcc-services`.
 
 ## Cambios respecto al original
 
@@ -105,8 +106,8 @@ El validador descarga lo que la credencial declara: listas de estado y de revoca
 JSON-LD, documentos de DID y llaves, esquemas y la URL del emisor. Como corre dentro de la red
 interna, una credencial armada a propósito puede hacer que el sidecar haga peticiones GET a
 servicios internos. La reescritura no amplía ese alcance, porque una credencial ya puede declarar
-esas URLs directamente; el riesgo viene de alojar el validador dentro del ambiente, igual que con
-VerifierPlus. Conviene restringir la salida de red del contenedor a lo que necesita.
+esas URLs directamente; el riesgo viene de alojar el validador dentro del ambiente. Conviene
+restringir la salida de red del contenedor a lo que necesita.
 
 La lista de estado y la credencial de `refreshService` sí están acotadas (`DownloadedResource`).
 Si la URL no la reescribió una regla de `STATUS_LIST_URL_REWRITES`, el host debe resolver solo a
@@ -189,7 +190,7 @@ de Velocity y los demás métodos van al resolvedor universal `dev.uniresolver.i
 
 ## Despliegue
 
-Corre como sidecar de `dcc-services`, igual que VerifierPlus, en devl y pprd:
+Corre como sidecar de `dcc-services` en devl y pprd:
 
 | Ambiente | Container App | Contenedor | Puerto |
 |---|---|---|---|
@@ -198,8 +199,8 @@ Corre como sidecar de `dcc-services`, igual que VerifierPlus, en devl y pprd:
 
 Cada sidecar tiene 0.5 vCPU y 1 GiB, sondas HTTP a `/actuator/health` y
 `STATUS_LIST_URL_REWRITES=https://<fqdn de dcc-services>/status-credential/|http://127.0.0.1:3000/status-credential/`.
-`dcc-services` lo usa con `ONEEDTECH_URL=http://127.0.0.1:3002`: es el proveedor `1edtech`, que se
-elige por petición (`verifier=1edtech`) o con `DEFAULT_VERIFIER`. La imagen es
+`dcc-services` lo usa con `ONEEDTECH_URL=http://127.0.0.1:3002`, que es obligatoria: es su único
+verificador (`1edtech`) y sin esa variable no arranca. La imagen es
 `azrdevlcredentials.azurecr.io/dcc-1edtech:<sha del commit>` y sirve para ambos ambientes.
 
 Workflows:
@@ -209,7 +210,8 @@ Workflows:
 - `.github/workflows/deploy.yml`: al llegar a `develop` construye la imagen `dcc-1edtech:<sha>`
   en ACR, comprueba que el contenedor `dcc-1edtech-devl` ya existe, actualiza solo ese contenedor
   y espera a que la revisión quede sana; al llegar a `release`, lo mismo con `dcc-1edtech-pprd`.
-  Un cambio que solo toca archivos `*.md` no despliega. Producción todavía no tiene el sidecar.
+  Un cambio que solo toca archivos `*.md` no despliega. Producción todavía no tiene el sidecar
+  (ver «Producción»).
   - Los cambios entran por pull request a `develop`; después se pasan de `develop` a `release` y
     de `release` a `main`.
   - El lanzamiento a mano (`workflow_dispatch`) solo aparece cuando el workflow ya está en `main`,
@@ -223,3 +225,26 @@ tec-credentials: `vars.AZURE_CONTAINER_REGISTRY` (`azrdevlcredentials`), `vars.R
 environments requiere ser administrador del repositorio. Como `dcc-services` se despliega desde tec-credentials, sus
 workflows no comparten grupo de concurrencia con este: si los dos actualizan la misma Container
 App al mismo tiempo, uno puede fallar y hay que relanzarlo.
+
+### Producción
+
+`dcc-services` no arranca sin `ONEEDTECH_URL`, así que prod necesita el sidecar antes de que llegue
+a `main` la versión de tec-credentials que verifica solo con 1EdTech. Lo hace alguien con acceso al
+grupo `RG_Servicios_TecCredentials_Prod`:
+
+1. Copiar la imagen al registro de prod:
+   `az acr import -n azrdevlcredentialsprod --source azrdevlcredentials.azurecr.io/dcc-1edtech:<sha> --image dcc-1edtech:<sha>`.
+2. Agregar a `dcc-services-prod` el contenedor `dcc-1edtech-prod` con la configuración de la tabla
+   de arriba: imagen `azrdevlcredentialsprod.azurecr.io/dcc-1edtech:<sha>`, 0.5 vCPU, 1 GiB,
+   `SERVER_PORT=3002`, sondas de arranque, preparación y vida a `/actuator/health` en el puerto
+   3002, y `STATUS_LIST_URL_REWRITES=https://<fqdn de dcc-services-prod>/status-credential/|http://127.0.0.1:3000/status-credential/`.
+   La suma de CPU y memoria de todos los contenedores de la app debe ser una combinación válida
+   de Container Apps (por ejemplo, 1 vCPU y 2 GiB).
+3. En el mismo cambio, agregar `ONEEDTECH_URL=http://127.0.0.1:3002` al contenedor
+   `dcc-services-prod`, para que la revisión nueva arranque con el sidecar listo.
+4. Comprobar que la revisión queda sana y que `GET /verifier/providers` de `dcc-services-prod`
+   responde solo `1edtech`.
+
+Después se pueden quitar de `dcc-services-prod` las variables de los verificadores que ya no se
+usan (`URL_VERIFIERPLUS`, `IS_VERIFIERPLUS`, `DEFAULT_VERIFIER`, `DAPR_*_VERIFIER`); el servicio
+las ignora.

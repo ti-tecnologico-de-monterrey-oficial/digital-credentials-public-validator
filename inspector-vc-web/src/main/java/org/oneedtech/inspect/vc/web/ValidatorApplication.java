@@ -2,6 +2,7 @@ package org.oneedtech.inspect.vc.web;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.oneedtech.inspect.vc.status.StatusListUrlRewriter;
 import org.oneedtech.inspect.web.InspectorWebConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -21,6 +22,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class ValidatorApplication implements WebMvcConfigurer {
 
 	public static void main(String[] args) {
+		// An invalid STATUS_LIST_URL_REWRITES must stop startup, not fail every validation later.
+		StatusListUrlRewriter.fromEnvironment();
 		SpringApplication.run(ValidatorApplication.class, args);
 	}
 

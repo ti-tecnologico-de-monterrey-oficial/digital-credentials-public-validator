@@ -52,7 +52,6 @@ WORKDIR /app
 # aplicación no puede reescribir sus propios archivos.
 COPY --from=build /layers/dependencies/ ./
 COPY --from=build /layers/spring-boot-loader/ ./
-COPY --from=build /layers/snapshot-dependencies/ ./
 COPY --from=build /layers/application/ ./
 
 # Caché AOT (JEP 483/514): una corrida de entrenamiento que se detiene al

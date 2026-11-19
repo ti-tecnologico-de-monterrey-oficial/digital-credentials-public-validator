@@ -15,15 +15,14 @@
 		<into layer="application">
 			<includeModuleDependencies />
 		</into>
-		<into layer="snapshot-dependencies">
-			<include>*:*:*SNAPSHOT</include>
-		</into>
+		<!-- No snapshot-dependencies layer: the build has no SNAPSHOT libraries, and an empty layer
+			copied with COPY breaks the classic Docker builder that az acr build uses ("failed to get
+			layer ... layer does not exist"). A SNAPSHOT library would land in dependencies. -->
 		<into layer="dependencies" />
 	</dependencies>
 	<layerOrder>
 		<layer>dependencies</layer>
 		<layer>spring-boot-loader</layer>
-		<layer>snapshot-dependencies</layer>
 		<layer>application</layer>
 	</layerOrder>
 </layers>

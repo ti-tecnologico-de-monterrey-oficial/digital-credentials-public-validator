@@ -50,8 +50,13 @@ WORKDIR /app
 
 # El código queda a nombre de root y el proceso corre como validator: la
 # aplicación no puede reescribir sus propios archivos.
+# Los RUN true entre los COPY --from evitan que el builder clásico de Docker que
+# usa az acr build falle al exportar la imagen («failed to get layer ... layer
+# does not exist») con varios COPY --from seguidos.
 COPY --from=build /layers/dependencies/ ./
+RUN true
 COPY --from=build /layers/spring-boot-loader/ ./
+RUN true
 COPY --from=build /layers/application/ ./
 
 # Caché AOT (JEP 483/514): una corrida de entrenamiento que se detiene al

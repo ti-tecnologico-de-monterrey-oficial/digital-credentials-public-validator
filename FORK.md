@@ -246,5 +246,5 @@ grupo `RG_Servicios_TecCredentials_Prod`:
    responde solo `1edtech`.
 
 Después se pueden quitar de `dcc-services-prod` las variables de los verificadores que ya no se
-usan (`URL_VERIFIERPLUS`, `IS_VERIFIERPLUS`, `DEFAULT_VERIFIER`, `DAPR_*_VERIFIER`); el servicio
+usan (`URL_VERIFIERPLUS`, `IS_VERIFIERPLUS`, `IS_VERIFY_AZ`, `DEFAULT_VERIFIER`, `DAPR_*_VERIFIER`); el servicio
 las ignora.

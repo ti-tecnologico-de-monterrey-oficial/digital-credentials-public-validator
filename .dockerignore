@@ -1,0 +1,10 @@
+# Solo el código y los POM entran al contexto: los target/ locales no deben
+# mezclarse con lo que compila la imagen.
+.git
+.github
+**/target
+**/.flattened-pom.xml
+**/logs
+**/*.md
+Dockerfile
+.dockerignore

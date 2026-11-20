@@ -1,0 +1,6 @@
+# Corregidas solo en Spring Framework 7 (Spring Boot 4); las librerías inspector-web-* de 1EdTech
+# están compiladas para Spring 6. Ninguna aplica a esta aplicación:
+# - XsltView: la aplicación no usa vistas XSLT, solo Thymeleaf.
+CVE-2026-47884
+# - Server-Sent Events con fragmentos de vista: la aplicación no expone SSE.
+CVE-2026-47890

@@ -1,0 +1,96 @@
+name: Deploy sidecar
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: Ambiente en el que se despliega
+        required: true
+        type: choice
+        options:
+          - Dev
+          - Pprd
+
+  push:
+    branches: [develop, release]
+    paths-ignore:
+      - '**/*.md'
+
+permissions:
+  contents: read
+
+# Cada environment de GitHub (Dev, Pprd) define vars.AZURE_CONTAINER_REGISTRY,
+# vars.RESOURCE_GROUP y secrets.AZURE_CREDENTIALS, como en tec-credentials.
+jobs:
+  deploy:
+    name: Deploy ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_environment || (github.ref == 'refs/heads/release' && 'Pprd' || 'Dev') }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_environment || (github.ref == 'refs/heads/release' && 'Pprd' || 'Dev') }}
+    timeout-minutes: 40
+    concurrency:
+      group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.deploy_environment || (github.ref == 'refs/heads/release' && 'Pprd' || 'Dev') }}
+      cancel-in-progress: false
+    env:
+      TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_environment || (github.ref == 'refs/heads/release' && 'Pprd' || 'Dev') }}
+      REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Elegir la Container App y el contenedor
+        run: |
+          case "$TARGET" in
+            Dev) echo "ACA_NAME=dcc-services-devl" >> "$GITHUB_ENV"; echo "CONTAINER_NAME=dcc-1edtech-devl" >> "$GITHUB_ENV" ;;
+            Pprd) echo "ACA_NAME=dcc-services-pprd" >> "$GITHUB_ENV"; echo "CONTAINER_NAME=dcc-1edtech-pprd" >> "$GITHUB_ENV" ;;
+            *) echo "::error::Ambiente desconocido: $TARGET"; exit 1 ;;
+          esac
+          [[ -n "$REGISTRY" && -n "$RESOURCE_GROUP" ]] || { echo '::error::Faltan vars.AZURE_CONTAINER_REGISTRY o vars.RESOURCE_GROUP en el environment'; exit 1; }
+
+      - name: Azure login
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Construir y publicar la imagen en ACR
+        run: |
+          az acr build \
+            --registry "$REGISTRY" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "dcc-1edtech:${GITHUB_SHA}" \
+            --file Dockerfile .
+
+      # az containerapp update agrega un contenedor nuevo, sin variables ni sondas,
+      # si el nombre no existe: el sidecar se crea una vez con su configuración
+      # completa y este workflow solo cambia su imagen.
+      - name: Comprobar que el sidecar ya existe
+        run: |
+          existe=$(az containerapp show --name "$ACA_NAME" --resource-group "$RESOURCE_GROUP" --output json \
+            | jq --arg nombre "$CONTAINER_NAME" '[.properties.template.containers[] | select(.name == $nombre)] | length')
+          [[ "$existe" == "1" ]] || { echo "::error::$ACA_NAME no tiene el contenedor $CONTAINER_NAME; créalo primero con su configuración completa"; exit 1; }
+
+      - name: Actualizar solo el contenedor del sidecar
+        run: |
+          az containerapp update \
+            --name "$ACA_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --container-name "$CONTAINER_NAME" \
+            --image "${REGISTRY}.azurecr.io/dcc-1edtech:${GITHUB_SHA}" \
+            --output none
+
+      - name: Esperar a que la revisión quede sana
+        run: |
+          revision=$(az containerapp show --name "$ACA_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.latestRevisionName --output tsv)
+          for _ in $(seq 1 30); do
+            state=$(az containerapp revision show --name "$ACA_NAME" --resource-group "$RESOURCE_GROUP" \
+              --revision "$revision" --query "[properties.healthState, properties.runningState]" --output tsv)
+            echo "$revision: $state"
+            case "$state" in
+              Healthy*) exit 0 ;;
+              *Failed*|Unhealthy*) exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::La revisión $revision no quedó sana en 5 minutos"
+          exit 1
